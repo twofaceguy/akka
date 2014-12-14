@@ -299,7 +299,6 @@ trait PersistentView extends Actor with Snapshotter with Stash with StashFactory
         onReplayComplete(await)
       case ReplayMessagesFailure(cause) ⇒
         onReplayComplete(await)
-        // FIXME what happens if RecoveryFailure is handled, i.e. actor is not stopped?
         PersistentView.super.aroundReceive(receive, RecoveryFailure(cause)(None))
       case other ⇒
         internalStash.stash()
