@@ -25,7 +25,7 @@ class HeartbeatNodeRingSpec extends WordSpec with Matchers {
   "A HashedNodeRing" must {
 
     "pick specified number of nodes as receivers" in {
-      val ring = HeartbeatNodeRing(cc, nodes, 3)
+      val ring = HeartbeatNodeRing(cc, nodes, Set.empty, 3)
       ring.myReceivers should be(ring.receivers(cc))
 
       nodes foreach { n ⇒
@@ -35,15 +35,25 @@ class HeartbeatNodeRingSpec extends WordSpec with Matchers {
       }
     }
 
+    "pick specified number of nodes + unreachable as receivers" in {
+      val ring = HeartbeatNodeRing(cc, nodes, Set(dd, aa), 3)
+      ring.myReceivers should be(ring.receivers(cc))
+
+      ring.receivers(aa) should be(Set(bb, cc, dd, ee))
+      ring.receivers(bb) should be(Set(cc, dd, ee, aa))
+      ring.receivers(cc) should be(Set(dd, ee, aa, bb))
+      ring.receivers(dd) should be(Set(ee, aa, bb, cc))
+    }
+
     "pick all except own as receivers when less than total number of nodes" in {
       val expected = Set(aa, bb, dd, ee)
-      HeartbeatNodeRing(cc, nodes, 4).myReceivers should be(expected)
-      HeartbeatNodeRing(cc, nodes, 5).myReceivers should be(expected)
-      HeartbeatNodeRing(cc, nodes, 6).myReceivers should be(expected)
+      HeartbeatNodeRing(cc, nodes, Set.empty, 4).myReceivers should be(expected)
+      HeartbeatNodeRing(cc, nodes, Set.empty, 5).myReceivers should be(expected)
+      HeartbeatNodeRing(cc, nodes, Set.empty, 6).myReceivers should be(expected)
     }
 
     "pick none when alone" in {
-      val ring = HeartbeatNodeRing(cc, Set(cc), 3)
+      val ring = HeartbeatNodeRing(cc, Set(cc), Set.empty, 3)
       ring.myReceivers should be(Set())
     }
 
