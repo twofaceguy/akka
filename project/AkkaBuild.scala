@@ -1064,7 +1064,12 @@ object AkkaBuild extends Build {
       ProblemFilters.exclude[MissingClassProblem]("akka.io.TcpConnection$UpdatePendingWrite"),
 
       // Change to optimize use of ForkJoin with Akka's Mailbox
-      ProblemFilters.exclude[MissingMethodProblem]("akka.dispatch.Mailbox.status")
+      ProblemFilters.exclude[MissingMethodProblem]("akka.dispatch.Mailbox.status"),
+      
+      // Change to improve cluster heartbeat sender, #16638
+      FilterAnyProblem("akka.cluster.HeartbeatNodeRing"),
+      FilterAnyProblem("akka.cluster.ClusterHeartbeatSenderState")
+      
     )
   }
 
