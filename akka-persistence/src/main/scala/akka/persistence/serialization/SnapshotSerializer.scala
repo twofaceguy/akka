@@ -87,28 +87,53 @@ class SnapshotSerializer(system: ExtendedActorSystem) extends Serializer {
   private def snapshotFromBinary(bytes: Array[Byte]): AnyRef = {
     val extension = SerializationExtension(system)
 
-    val headerLength = readInt(new ByteArrayInputStream(bytes))
+    val in = new ByteArrayInputStream(bytes)
+    val headerLength = readInt(in)
     val headerBytes = bytes.slice(4, headerLength + 4)
     val snapshotBytes = bytes.drop(headerLength + 4)
 
+    def patch(b: Array[Byte]): Array[Byte] = {
+      import SnapshotSerializer._
+      def find(pos: Int, offset: Int): Int = {
+        if (pos == b.length) -1
+        else if (offset == key.length) pos
+        else if (b(pos + offset) == key(offset)) find(pos, offset + 1)
+        else find(pos + 1, 0)
+      }
+      val found = find(0, 0)
+      if (found == -1) b
+      else {
+        val n = new Array[Byte](b.length)
+        val start = found + offset
+        val end = start + replacement.length
+        System.arraycopy(b, 0, n, 0, start)
+        System.arraycopy(replacement, 0, n, start, replacement.length)
+        System.arraycopy(b, end, n, end, b.length - end)
+        n
+      }
+    }
+
     // If we are allowed to break serialization compatibility of stored snapshots in 2.4
-    // we can remove this attempt of deserialize SnapshotHeader with JavaSerializer.
-    // Then the class SnapshotHeader can be removed. See isseue #16009
-    val header = extension.deserialize(headerBytes, classOf[SnapshotHeader]) match {
-      case Success(header) ⇒
-        header
-      case Failure(_) ⇒
-        val headerIn = new ByteArrayInputStream(headerBytes)
-        val serializerId = readInt(headerIn)
-        val remaining = headerIn.available
-        val manifest =
-          if (remaining == 0) None
-          else {
-            val manifestBytes = Array.ofDim[Byte](remaining)
-            headerIn.read(manifestBytes)
-            Some(new String(manifestBytes, "utf-8"))
-          }
-        SnapshotHeader(serializerId, manifest)
+    // we can remove this attempt to deserialize SnapshotHeader with JavaSerializer.
+    // Then the class SnapshotHeader can be removed. See issue #16009
+    val oldHeader =
+      if (readShort(in) == 0xedac) { // Java Serialization magic value with swapped bytes
+        val b = if (SnapshotSerializer.doPatch) patch(headerBytes) else headerBytes
+        extension.deserialize(b, classOf[SnapshotHeader]).toOption
+      } else None
+
+    val header = oldHeader.getOrElse {
+      val headerIn = new ByteArrayInputStream(headerBytes)
+      val serializerId = readInt(headerIn)
+      val remaining = headerIn.available
+      val manifest =
+        if (remaining == 0) None
+        else {
+          val manifestBytes = Array.ofDim[Byte](remaining)
+          headerIn.read(manifestBytes)
+          Some(new String(manifestBytes, "utf-8"))
+        }
+      SnapshotHeader(serializerId, manifest)
     }
     val manifest = header.manifest.map(system.dynamicAccess.getClassFor[AnyRef](_).get)
 
@@ -118,6 +143,39 @@ class SnapshotSerializer(system: ExtendedActorSystem) extends Serializer {
   private def writeInt(outputStream: OutputStream, i: Int) =
     0 to 24 by 8 foreach { shift ⇒ outputStream.write(i >> shift) }
 
-  private def readInt(inputStream: InputStream) =
-    (0 to 24 by 8).foldLeft(0) { (id, shift) ⇒ (id | (inputStream.read() << shift)) }
+  private def readShort(inputStream: InputStream) = {
+    val ch1 = inputStream.read()
+    val ch2 = inputStream.read()
+    (ch2 << 8) | ch1
+  }
+
+  private def readInt(inputStream: InputStream) = {
+    val sh1 = readShort(inputStream)
+    val sh2 = readShort(inputStream)
+    (sh2 << 16) | sh1
+  }
+}
+
+object SnapshotSerializer {
+  /*
+   * This is the serialized form of Class[Option[_]] with Scala 2.10.
+   */
+  val key: Array[Byte] = Array(
+    0x78, 0x72, 0x00, 0x0c, 0x73, 0x63, 0x61, 0x6c,
+    0x61, 0x2e, 0x4f, 0x70, 0x74, 0x69, 0x6f, 0x6e,
+    0xe3, 0x60, 0x24, 0xa8, 0x32, 0x8a, 0x45, 0xe9, // here is the UID
+    0x02, 0x00, 0x00, 0x78, 0x70).map(_.toByte)
+  // The offset of the serialVersionUID in the above.
+  val offset = 16
+  // This is the new serialVersionUID from Scala 2.11 onwards.
+  val replacement: Array[Byte] = Array(
+    0xfe, 0x69, 0x37, 0xfd, 0xdb, 0x0e, 0x66, 0x74).map(_.toByte)
+  val doPatch: Boolean = {
+    val baus = new ByteArrayOutputStream()
+    val out = new ObjectOutputStream(baus)
+    out.writeObject(None)
+    val uid: Seq[Byte] = baus.toByteArray.slice(46, 54)
+    // only attempt to patch if we know the target class
+    uid == replacement.toSeq
+  }
 }
