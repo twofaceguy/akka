@@ -275,7 +275,7 @@ private[cluster] case class HeartbeatNodeRing(
     else {
 
       // Pick nodes from the iterator until n nodes that are not unreachable have been selected.
-      // Intermediate unreachable nodes are also included in the result.
+      // Intermediate unreachable nodes up to `monitoredByNrOfMembers` are also included in the result.
       // The reason for not limiting it to strictly monitoredByNrOfMembers is that the leader must
       // be able to continue its duties (e.g. removal of downed nodes) when many nodes are shutdown
       // at the same time and nobody in the remaining cluster is monitoring some of the shutdown nodes.
@@ -284,7 +284,13 @@ private[cluster] case class HeartbeatNodeRing(
         if (iter.isEmpty || n == 0) (n, acc)
         else {
           val next = iter.next()
-          take(if (unreachable(next)) n else n - 1, iter, acc + next)
+          val isUnreachable = unreachable(next)
+          if (isUnreachable && acc.size >= monitoredByNrOfMembers)
+            take(n, iter, acc) // skip the unreachable, since we have already picked `monitoredByNrOfMembers`
+          else if (isUnreachable)
+            take(n, iter, acc + next) // include the unreachable, but don't count it
+          else
+            take(n - 1, iter, acc + next) // include the reachable
         }
 
       val (remaining, slice1) = take(monitoredByNrOfMembers, nodeRing.from(sender).tail.iterator, Set.empty)
@@ -293,8 +299,8 @@ private[cluster] case class HeartbeatNodeRing(
           slice1
         else {
           // wrap around
-          val (_, slice) = take(remaining, nodeRing.to(sender).iterator.filterNot(_ == sender), slice1)
-          slice
+          val (_, slice2) = take(remaining, nodeRing.to(sender).iterator.filterNot(_ == sender), slice1)
+          slice2
         }
 
       slice

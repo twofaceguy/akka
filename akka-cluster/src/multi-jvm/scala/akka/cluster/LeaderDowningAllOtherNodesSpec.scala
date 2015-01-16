@@ -46,7 +46,7 @@ abstract class LeaderDowningAllOtherNodesSpec
       enterBarrier("after-1")
     }
 
-    "remove all shutdown nodes" in {
+    "remove all shutdown nodes" taggedAs LongRunningTest in {
       val others = roles.drop(1)
       val shutdownAddresses = others.map(address).toSet
       runOn(first) {
